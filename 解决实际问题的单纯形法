@@ -1,0 +1,57 @@
+import numpy as np
+
+
+def _pivot(mat, B, row, col):
+    mat[row] /= mat[row][col]   #移项后除以替入变量的系数
+    ids = np.arange(mat.shape[0]) != row
+    # 约束条件中替入和替出变量的替换：mat[i]= mat[i] - mat[row] * mat[i][col]
+    mat[ids] -= mat[row] * mat[ids, col : col + 1]
+    B[row] = col
+
+class Simplex(object):
+    def __init__(self, obj, max_mode=False):  # 默认解决线性规划最小值, 如果想解决最大线性规划就乘以-1
+        self.mat, self.max_mode = np.array([[0] + obj]) * (-1 if max_mode else 1), max_mode
+
+    def add_constraint(self, a, b):
+        self.mat = np.vstack([self.mat, [b] + a])
+
+    def _simplex(self, mat, B, m, n):
+        while mat[0, 1:].min() < 0:
+            col = np.where(mat[0, 1:] < 0)[0][0] + 1  # 用bland方法避免退化
+            row = np.array([mat[i][0] / mat[i][col] if mat[i][col] > 0
+                            else 0x7fffffff
+                            for i in range(1, mat.shape[0])]).argmin() + 1  # 尽可能选择下标小的作为替入变量
+            if mat[row][col] <= 0:
+                return None  # 替入变量没有任何约束, 则可以无穷大，即为无界情况
+            _pivot(mat, B, row, col)
+            #返回矩阵的最左上角的数即为最值，返回决策变量值，未返回的变量为视为0
+        return mat[0][0] * (1 if self.max_mode else -1), {B[i]: mat[i, 0] for i in range(1, m) if B[i] < n}
+
+    @property
+    def solve(self):
+        m, n = self.mat.shape
+        # m - 1 是我们应该添加的松弛变量数
+        temp, B = np.vstack([np.zeros((1, m - 1)), np.eye(m - 1)]), list(range(n - 1, n + m - 1))  # 添加对角数组
+        mat = self.mat = np.hstack([self.mat, temp])  # 联合在一起成新的矩阵
+        # 判断初始基本解是否可行
+        if mat[1:, 0].min() < 0:
+            row = mat[1:, 0].argmin() + 1  # 找下标最小的值
+            temp, mat[0] = np.copy(mat[0]), 0  # 将第一行值设置为零，并存储上一个值
+            mat = np.hstack([mat, np.array([1] + [-1] * (m - 1)).reshape((-1, 1))])
+            _pivot(mat, B, row, mat.shape[1] - 1)
+            if self._simplex(mat, B, m, n)[0] != 0:
+                return None  # 无解
+
+            if mat.shape[1] - 1 in B:  # 如果 x0 在 B 中, 我们就该转动它
+                _pivot(mat, B, B.index(mat.shape[1] - 1), np.where(mat[0, 1:] != 0)[0][0] + 1)
+            self.mat = np.vstack([temp, mat[1:, :-1]])  # 恢复第一行
+            for i, x in enumerate(B[1:]):
+                self.mat[0] -= self.mat[0, x] * self.mat[i + 1]
+        return self._simplex(self.mat, B, m, n)
+
+t = Simplex([3, 9, 20, 19])
+t.add_constraint([-110, -160, -420, -260], -2000)
+t.add_constraint([-4, -8, -4, -14], -55)
+t.add_constraint([-2, -285, -22, -80], -800)
+print(t.solve)
+print(t.mat)
